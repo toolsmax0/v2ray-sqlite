@@ -2,23 +2,41 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
-	"github.com/influxdata/influxdb/client/v2"
-	"google.golang.org/grpc"
-	"gopkg.in/ini.v1"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"strconv"
 	"strings"
-	"time"
-	"v2ray.com/core/app/stats/command"
+
+	"github.com/go-yaml/yaml"
+	"github.com/liushuochen/gotable"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/v2fly/v2ray-core/app/stats/command"
+	"google.golang.org/grpc"
 )
 
+//Stat  a single record of traffic
 type Stat struct {
 	User  string
 	Type  string
 	value int64
 }
 
-func QueryStats(c command.StatsServiceClient) (stats []Stat, err error) {
+func readableSize(n int64) (s string) {
+	f := float64(n)
+	p := []string{"B", "KB", "MB", "GB", "TB"}
+	i := 0
+	for f > 1024 {
+		f /= 1024
+		i++
+	}
+	s = strconv.FormatFloat(f, 'f', 2, 64) + p[i]
+	return
+}
+
+func queryStats(c command.StatsServiceClient) (stats []Stat, err error) {
 	resp, err := c.QueryStats(context.Background(), &command.QueryStatsRequest{
 		Pattern: "user>>>",
 		Reset_:  true,
@@ -35,96 +53,142 @@ func QueryStats(c command.StatsServiceClient) (stats []Stat, err error) {
 	}
 	return
 }
-
-func QueryServerStats(addr string) (stats []Stat, err error) {
+func queryServerStats(addr string) (stats []Stat, err error) {
 	cmdConn, err := grpc.Dial(addr, grpc.WithInsecure())
 	if err != nil {
 		return
 	}
 	defer func() { _ = cmdConn.Close() }()
 	statsClient := command.NewStatsServiceClient(cmdConn)
-	stats, err = QueryStats(statsClient)
+	stats, err = queryStats(statsClient)
 	if err != nil {
 		return
 	}
 	return
 }
-
-func WriteToDB(addr, dbname string, serverStats map[string][]Stat, usernameAndPassword ...string) (err error) {
-	var username, password string
-	if len(usernameAndPassword) >= 2 {
-		username = usernameAndPassword[0]
-		password = usernameAndPassword[1]
-	}
-
-	conn, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     addr,
-		Username: username,
-		Password: password,
-	})
+func writeToDB(database string, table string, stats []Stat, flush bool) (err error) {
+	db, err := sql.Open("sqlite3", database)
 	if err != nil {
+		log.Fatalln(err)
 		return
 	}
-	defer func() { _ = conn.Close() }()
-
-	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-		Database:  dbname,
-		Precision: "s",
-	})
-	if err != nil {
-		return
-	}
-
-	for server, stats := range serverStats {
-		for _, stat := range stats {
-			var pt *client.Point
-			pt, err = client.NewPoint("stat", map[string]string{
-				"server": server,
-				"user":   stat.User,
-				"type":   stat.Type,
-			}, map[string]interface{}{
-				"value": stat.value,
-			}, time.Now())
-			if err != nil {
-				return
-			}
-			bp.AddPoint(pt)
+	defer db.Close()
+	if flush {
+		_, err = db.Exec(fmt.Sprintf("delete from %s", table))
+		if err != nil {
+			log.Fatalln(err)
+			return
 		}
+		return
 	}
-	err = conn.Write(bp)
+	SUMU := Stat{"SUM", "uplink", 0}
+	SUMD := Stat{"SUM", "downlink", 0}
+	head := []string{"User", "Flow"}
+	tab, err := gotable.CreateTable(head)
+	if err != nil {
+		log.Fatalln(err)
+		return
+	}
+	eg, err := db.Begin()
+	if err != nil {
+		log.Fatalln(err)
+		return
+	}
+
+	query, err := eg.Prepare(fmt.Sprintf("select value from %s where user = ? and type = ? ", table))
+	if err != nil {
+		log.Fatalln(err)
+		return
+	}
+
+	update, err := eg.Prepare(fmt.Sprintf("insert or replace into %s values( ? , ? , ? )", table))
+	if err != nil {
+		log.Fatalln(err)
+		return
+	}
+
+	for _, stat := range stats {
+		rows, err := query.Query(stat.User, stat.Type)
+		if err != nil {
+			log.Fatalln(err)
+			break
+		}
+		for rows.Next() {
+			var value int64
+			err = rows.Scan(&value)
+			if err != nil {
+				log.Fatalln(err)
+				break
+			}
+			stat.value += value
+		}
+		rows.Close()
+		switch stat.Type {
+		case "uplink":
+			SUMU.value += stat.value
+		case "downlink":
+			SUMD.value += stat.value
+		}
+
+		_, err = update.Exec(stat.User, stat.Type, stat.value)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		rec := map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", stat.User, stat.Type)), "Flow": gotable.TableValue(readableSize(stat.value))}
+		tab.AddValue(rec)
+	}
+	_, err = update.Exec(SUMU.User, SUMU.Type, SUMU.value)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	_, err = update.Exec(SUMD.User, SUMD.Type, SUMD.value)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	query.Close()
+	update.Close()
+	eg.Commit()
+	rec := map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", SUMU.User, SUMU.Type)), "Flow": gotable.TableValue(readableSize(SUMU.value))}
+	tab.AddValue(rec)
+	rec = map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", SUMD.User, SUMD.Type)), "Flow": gotable.TableValue(readableSize(SUMD.value))}
+	tab.AddValue(rec)
+	rec = map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprint("SUM")), "Flow": gotable.TableValue(readableSize(SUMD.value + SUMU.value))}
+	tab.AddValue(rec)
+	tab.PrintTable()
 	return
+}
+
+//T config struct for YAML
+type T struct {
+	Server   string `yaml:"server"`
+	Database string `yaml:"database"`
+	Table    string `yaml:"table"`
 }
 
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Llongfile)
 
-	configPath := flag.String("config", "./config.ini", "path to config file")
+	configPath := flag.String("config", "./config.yml", "path to config file")
+	reset := flag.Bool("reset", false, "whether to reset the records in the database")
 	flag.Parse()
-	conf, err := ini.Load(*configPath)
+	conf, err := ioutil.ReadFile(*configPath)
 	if err != nil {
 		log.Fatalln(err)
 	}
-
-	var serverStats = make(map[string][]Stat)
-
-	for _, server := range conf.Section("servers").Keys() {
-		stats, err := QueryServerStats(server.Value())
-		if err != nil {
-			log.Println("fail to QueryServerStats", server.Name(), err)
-		}
-
-		if len(stats) > 0 {
-			serverStats[server.Name()] = stats
-		}
+	m := T{}
+	err = yaml.Unmarshal(conf, &m)
+	if err != nil {
+		log.Fatalln(err)
 	}
-
-	if len(serverStats) <= 0 {
+	server := m.Server
+	stats, err := queryServerStats(server)
+	if err != nil {
+		log.Println("fail to QueryServerStats", server, err)
+	}
+	if len(stats) <= 0 {
 		return
 	}
-
-	sectInfluxDB := conf.Section("influxDB")
-	err = WriteToDB(sectInfluxDB.Key("addr").Value(), sectInfluxDB.Key("dbname").Value(), serverStats,
-		sectInfluxDB.Key("username").Value(), sectInfluxDB.Key("password").Value())
+	err = writeToDB(m.Database, m.Table, stats, *reset)
 	if err != nil {
 		log.Fatalln(err)
 	}

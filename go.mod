@@ -1,10 +1,12 @@
-module github.com/liberal-boy/v2ray-influxdb
+module main
 
-go 1.13
+go 1.15
 
 require (
-	github.com/influxdata/influxdb v1.7.9
-	google.golang.org/grpc v1.27.0
-	gopkg.in/ini.v1 v1.52.0
-	v2ray.com/core v4.19.1+incompatible
+	github.com/go-yaml/yaml v2.1.0+incompatible // indirect
+	github.com/liushuochen/gotable v0.0.0-20201214131409-4fa980c828ff
+	github.com/mattn/go-sqlite3 v1.14.6 // indirect
+	github.com/v2fly/v2ray-core v4.15.0+incompatible // indirect
+	google.golang.org/grpc v1.34.0 // indirect
+	v2ray.com/core v4.19.1+incompatible // indirect
 )
