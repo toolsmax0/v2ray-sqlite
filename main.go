@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -66,21 +67,13 @@ func queryServerStats(addr string) (stats []Stat, err error) {
 	}
 	return
 }
-func writeToDB(database string, table string, stats []Stat, flush bool) (err error) {
+func writeToDB(database string, table string, stats []Stat, reset bool) (err error) {
 	db, err := sql.Open("sqlite3", database)
 	if err != nil {
 		log.Fatalln(err)
 		return
 	}
 	defer db.Close()
-	if flush {
-		_, err = db.Exec(fmt.Sprintf("delete from %s", table))
-		if err != nil {
-			log.Fatalln(err)
-			return
-		}
-		return
-	}
 	SUMU := Stat{"SUM", "uplink", 0}
 	SUMD := Stat{"SUM", "downlink", 0}
 	head := []string{"User", "Flow"}
@@ -147,6 +140,13 @@ func writeToDB(database string, table string, stats []Stat, flush bool) (err err
 	}
 	query.Close()
 	update.Close()
+	if reset {
+		_, err = eg.Exec(fmt.Sprintf("delete from %s", table))
+		if err != nil {
+			log.Fatalln(err)
+			return
+		}
+	}
 	eg.Commit()
 	rec := map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", SUMU.User, SUMU.Type)), "Flow": gotable.TableValue(readableSize(SUMU.value))}
 	tab.AddValue(rec)
@@ -188,6 +188,12 @@ func main() {
 	if len(stats) <= 0 {
 		return
 	}
+	sort.SliceStable(stats, func(i, j int) bool {
+		if stats[i].User == stats[j].User {
+			return stats[i].Type > stats[j].Type
+		}
+		return stats[i].User < stats[j].User
+	})
 	err = writeToDB(m.Database, m.Table, stats, *reset)
 	if err != nil {
 		log.Fatalln(err)
