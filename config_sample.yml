@@ -1,3 +1,6 @@
+# The address and the port of dokodemo-door
 server: 127.0.0.1:8080
+# The location of the sqlite database
 database: /home/admin/sample.db
+# The name of the table to store information
 table: traffic
