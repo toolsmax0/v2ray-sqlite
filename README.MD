@@ -15,7 +15,7 @@ type TEXT,
 value INTEGER,
 PRIMARY KEY (user,type));`
 
-## Flags
+## Arguments
 
 - -reset : to reset the records in the database
-- -config FILE : path to config file
+- -config = FILE : path to config file
