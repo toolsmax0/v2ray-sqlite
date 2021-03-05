@@ -127,7 +127,9 @@ func writeToDB(database string, table string, stats []Stat, reset bool) (err err
 		if err != nil {
 			log.Fatalln(err)
 		}
-		rec := map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", stat.User, stat.Type)), "Flow": gotable.TableValue(readableSize(stat.value))}
+		rec := gotable.CreateEmptyValueMap()
+		rec["User"] = gotable.CreateValue(fmt.Sprintf("%s->%s", stat.User, stat.Type))
+		rec["Flow"] = gotable.CreateValue(readableSize(stat.value))
 		tab.AddValue(rec)
 	}
 	_, err = update.Exec(SUMU.User, SUMU.Type, SUMU.value)
@@ -148,11 +150,17 @@ func writeToDB(database string, table string, stats []Stat, reset bool) (err err
 		}
 	}
 	eg.Commit()
-	rec := map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", SUMU.User, SUMU.Type)), "Flow": gotable.TableValue(readableSize(SUMU.value))}
+	rec := gotable.CreateEmptyValueMap()
+	rec["User"] = gotable.CreateValue(fmt.Sprintf("%s->%s", SUMU.User, SUMU.Type))
+	rec["Flow"] = gotable.CreateValue(readableSize(SUMU.value))
 	tab.AddValue(rec)
-	rec = map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprintf("%s->%s", SUMD.User, SUMD.Type)), "Flow": gotable.TableValue(readableSize(SUMD.value))}
+	rec = gotable.CreateEmptyValueMap()
+	rec["User"] = gotable.CreateValue(fmt.Sprintf("%s->%s", SUMD.User, SUMD.Type))
+	rec["Flow"] = gotable.CreateValue(readableSize(SUMD.value))
 	tab.AddValue(rec)
-	rec = map[string]gotable.Sequence{"User": gotable.TableValue(fmt.Sprint("SUM")), "Flow": gotable.TableValue(readableSize(SUMD.value + SUMU.value))}
+	rec = gotable.CreateEmptyValueMap()
+	rec["User"] = gotable.CreateValue(fmt.Sprint("SUM"))
+	rec["Flow"] = gotable.CreateValue(readableSize(SUMD.value + SUMU.value))
 	tab.AddValue(rec)
 	tab.PrintTable()
 	return
