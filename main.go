@@ -14,7 +14,7 @@ import (
 	"github.com/go-yaml/yaml"
 	"github.com/liushuochen/gotable"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/v2fly/v2ray-core/app/stats/command"
+	"github.com/xtls/xray-core/app/stats/command"
 	"google.golang.org/grpc"
 )
 
@@ -37,8 +37,8 @@ func readableSize(n int64) (s string) {
 	return
 }
 
-func queryStats(c command.StatsServiceClient) (stats []Stat, err error) {
-	resp, err := c.QueryStats(context.Background(), &command.QueryStatsRequest{
+func queryStats(c *command.StatsServiceClient) (stats []Stat, err error) {
+	resp, err := (*c).QueryStats(context.Background(), &command.QueryStatsRequest{
 		Pattern: "user>>>",
 		Reset_:  true,
 	})
@@ -61,7 +61,7 @@ func queryServerStats(addr string) (stats []Stat, err error) {
 	}
 	defer func() { _ = cmdConn.Close() }()
 	statsClient := command.NewStatsServiceClient(cmdConn)
-	stats, err = queryStats(statsClient)
+	stats, err = queryStats(&statsClient)
 	if err != nil {
 		return
 	}

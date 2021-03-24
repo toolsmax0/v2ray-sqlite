@@ -1,7 +1,7 @@
-# V2ray-sqlite
+# Xray-sqlite
 
 A tool to store and print traffic status into sqlite 3.  
-Every time executed, this program will store the traffic status into the database and clear the records in v2ray. Then the program will print the traffic status in a table.
+Every time executed, this program will store the traffic status into the database and clear the records in Xray. Then the program will print the traffic status in a table.
 
 ## Config
 
